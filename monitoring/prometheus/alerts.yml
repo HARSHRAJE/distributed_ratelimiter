@@ -1,0 +1,67 @@
+groups:
+  - name: service-availability
+    rules:
+      - alert: GatewayScrapeTargetDown
+        expr: up{job="gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Gateway metrics endpoint is unavailable
+          description: Prometheus has failed to scrape the Gateway for one minute.
+
+      - alert: PolicyServiceScrapeTargetDown
+        expr: up{job="policy-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Policy Service metrics endpoint is unavailable
+          description: Prometheus has failed to scrape Policy Service for one minute.
+
+      - alert: OrdersServiceScrapeTargetDown
+        expr: up{job="orders-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Orders Service metrics endpoint is unavailable
+          description: Prometheus has failed to scrape Orders Service for one minute.
+
+      - alert: RedisUnavailable
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis exporter cannot reach Redis
+          description: Redis exporter reports that Redis is unavailable.
+
+  - name: policy-synchronization
+    rules:
+      - alert: PolicyOutboxEventsFailed
+        expr: policy_outbox_failed > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Policy outbox has exhausted events
+          description: One or more reconciliation events exhausted their retry limit.
+
+      - alert: PolicyOutboxBacklogGrowing
+        expr: delta(policy_outbox_pending[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Policy outbox pending backlog is growing
+          description: Pending reconciliation events have increased over the last ten minutes.
+
+      - alert: PolicySyncLagHigh
+        expr: policy_outbox_sync_lag > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Policy reconciliation is delayed
+          description: The oldest pending outbox event is more than five minutes old.

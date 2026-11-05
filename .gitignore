@@ -1,0 +1,26 @@
+.env
+.env.*
+!.env.example
+**/.env.example
+!.env.example
+
+# Local credentials and signing keys
+**/keys/
+**/*.pem
+**/*.key
+
+# Generated Java, Gradle, and Python artifacts
+.gradle/
+**/.gradle/
+**/build/
+**/bin/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/venv/
+*.py[cod]
+.coverage
+
+# Local IDE state
+.vscode/
+.idea/

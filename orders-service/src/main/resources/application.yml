@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: orders-service
+
+server:
+  port: 8082
+
+management:
+  server:
+    port: 9182
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

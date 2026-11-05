@@ -1,0 +1,47 @@
+
+spring:
+  application:
+    name: policy-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/rate_limiter}
+    username: ${DB_USERNAME:rate_limiter_app}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      connect-timeout: 2s
+      timeout: 2s
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+policy:
+  outbox:
+    dispatcher:
+      enabled: true
+
+server:
+  port: 8081
+
+management:
+  server:
+    port: 9181
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

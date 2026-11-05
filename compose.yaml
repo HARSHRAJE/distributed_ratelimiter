@@ -1,0 +1,132 @@
+
+services:
+  redis:
+    image: redis:7.4
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rate_limiter
+      POSTGRES_USER: rate_limiter_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rate_limiter_app -d rate_limiter"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.75.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    ports:
+      - "127.0.0.1:9121:9121"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis-exporter
+
+  ai-controller-api:
+    build:
+      context: ./ai-controller
+    restart: unless-stopped
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      AI_CONTROLLER_API_KEY: ${AI_CONTROLLER_API_KEY:-}
+      AI_CONTROLLER_COLLECTION_INTERVAL_SECONDS: ${AI_CONTROLLER_COLLECTION_INTERVAL_SECONDS:-15}
+      AI_CONTROLLER_STALE_AFTER_SECONDS: ${AI_CONTROLLER_STALE_AFTER_SECONDS:-60}
+      AI_CONTROLLER_AGGREGATION_WINDOW_SECONDS: ${AI_CONTROLLER_AGGREGATION_WINDOW_SECONDS:-300}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-rate_limiter}
+      DB_USERNAME: ${POSTGRES_USER:-rate_limiter_app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ai-controller-worker:
+    build:
+      context: ./ai-controller
+    restart: unless-stopped
+    command: ["python", "-m", "app.scheduler.collection_scheduler"]
+    environment:
+      AI_CONTROLLER_PROMETHEUS_URL: http://prometheus:9090
+      AI_CONTROLLER_SERVICE_KEYS: ${AI_CONTROLLER_SERVICE_KEYS:-orders-service}
+      AI_CONTROLLER_COLLECTION_INTERVAL_SECONDS: ${AI_CONTROLLER_COLLECTION_INTERVAL_SECONDS:-15}
+      AI_CONTROLLER_STALE_AFTER_SECONDS: ${AI_CONTROLLER_STALE_AFTER_SECONDS:-60}
+      AI_CONTROLLER_AGGREGATION_WINDOW_SECONDS: ${AI_CONTROLLER_AGGREGATION_WINDOW_SECONDS:-300}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-rate_limiter}
+      DB_USERNAME: ${POSTGRES_USER:-rate_limiter_app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local-only-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  redis_data:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

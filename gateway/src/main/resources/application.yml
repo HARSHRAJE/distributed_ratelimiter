@@ -1,0 +1,72 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: rate-limiter-gateway
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      connect-timeout: 2s
+      timeout: 2s
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: orders-service-root
+              uri: ${ORDERS_SERVICE_URI:http://localhost:8082}
+              predicates:
+                - Path=/api/orders
+              filters:
+                - name: RateLimit
+                  args:
+                    serviceKey: orders-service
+                    routeMappings:
+                      - GET|/api/orders|get-orders
+                      - POST|/api/orders|create-order
+            - id: orders-service
+              uri: ${ORDERS_SERVICE_URI:http://localhost:8082}
+              predicates:
+                - Path=/api/orders/**
+              filters:
+                - name: RateLimit
+                  args:
+                    serviceKey: orders-service
+                    routeMappings:
+                      - GET|/api/orders/**|get-orders
+                      - POST|/api/orders/**|create-order
+            - id: auth-service
+              uri: ${AUTH_SERVICE_URI:http://localhost:8083}
+              predicates:
+                - Path=/api/v1/auth/**
+
+security:
+  jwt:
+    public-key-location: ${AUTH_PUBLIC_KEY_LOCATION:file:./keys/auth-public.pem}
+    issuer: ${AUTH_ISSUER:http://localhost:8083}
+    audience: ${AUTH_AUDIENCE:rate-limiter-api}
+
+gateway:
+  rate-limit:
+    policy-cache-ttl: ${RATE_LIMIT_POLICY_CACHE_TTL:1s}
+
+management:
+  server:
+    port: 9180
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
