@@ -22,6 +22,7 @@ spring:
     open-in-view: false
 
 policy:
+  execution-api-key: ${POLICY_EXECUTION_API_KEY:}
   outbox:
     dispatcher:
       enabled: true

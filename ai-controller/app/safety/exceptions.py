@@ -1,0 +1,2 @@
+class RecommendationNotFoundError(LookupError):
+    pass

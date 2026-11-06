@@ -18,4 +18,10 @@ public interface ServiceRepository extends JpaRepository<ServiceEntity, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM ServiceEntity s WHERE s.id = :id")
     Optional<ServiceEntity> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM ServiceEntity s WHERE s.serviceKey = :serviceKey")
+    Optional<ServiceEntity> findByServiceKeyForUpdate(
+        @Param("serviceKey") String serviceKey
+    );
 }

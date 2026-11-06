@@ -1,3 +1,5 @@
+FROM grafana/k6:0.54.0 AS k6
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -5,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+COPY --from=k6 /usr/bin/k6 /usr/local/bin/k6
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

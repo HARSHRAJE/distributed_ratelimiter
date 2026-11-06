@@ -1,0 +1,88 @@
+import http from "k6/http";
+import { Counter, Trend } from "k6/metrics";
+
+const successful = new Counter("benchmark_successful_requests");
+const rateLimited = new Counter("benchmark_rate_limited_requests");
+const backendErrors = new Counter("benchmark_backend_errors");
+const accepted = new Counter("benchmark_accepted_requests");
+const strategyMismatches = new Counter("benchmark_strategy_mismatches");
+const tenantDemand = new Counter("benchmark_tenant_demand");
+const tenantAccepted = new Counter("benchmark_tenant_accepted");
+const acceptedLatency = new Trend("benchmark_accepted_latency_ms");
+const backendLatency = new Trend("benchmark_backend_latency_ms");
+
+const stages = JSON.parse(__ENV.BENCHMARK_STAGES || "[]").map((stage) => ({
+  duration: `${stage.duration}s`,
+  target: stage.target,
+}));
+const routePaths = (__ENV.BENCHMARK_ROUTE_PATHS || "/").split(",");
+const tenantTokens = JSON.parse(__ENV.BENCHMARK_TENANT_TOKENS || "[]");
+const config = {
+  scenarios: {
+    workload: {
+      executor: "ramping-arrival-rate",
+      startRate: Number(__ENV.BENCHMARK_START_RPS || 10),
+      timeUnit: "1s",
+      preAllocatedVUs: Math.max(20, Number(__ENV.BENCHMARK_PEAK_RPS || 100)),
+      maxVUs: Math.max(100, Number(__ENV.BENCHMARK_PEAK_RPS || 100) * 2),
+      stages,
+    },
+  },
+  thresholds: {},
+};
+
+export const options = config;
+
+export default function () {
+  const tenantCount = Math.max(1, Number(__ENV.BENCHMARK_TENANT_COUNT || 1));
+  const hotspot = __ENV.BENCHMARK_HOTSPOT === "true";
+  const paths = routePaths.map((path) => path.trim()).filter(Boolean);
+  const routeIndex = __VU % paths.length;
+  const tenantIndex = __VU % tenantCount;
+  const selectedTenant = hotspot && __VU % 10 !== 0 ? 0 : tenantIndex;
+  const tenantId = `benchmark-tenant-${selectedTenant}`;
+  const routeId = __ENV.BENCHMARK_ROUTE_IMBALANCE === "true"
+    ? (routeIndex === 0 ? "benchmark-expensive-route" : "benchmark-cheap-route")
+    : `benchmark-route-${routeIndex}`;
+  const path = paths[routeIndex] || "/";
+  const baseUrl = __ENV.BENCHMARK_TARGET_URL.replace(/\/+$/, "");
+  const headers = {
+      "X-Tenant-ID": tenantId,
+      "X-Benchmark-Route-ID": routeId,
+      "X-Benchmark-Strategy": __ENV.BENCHMARK_STRATEGY || "unknown",
+      "X-Benchmark-Config-Version": __ENV.BENCHMARK_CONFIG_VERSION || "unknown",
+  };
+  if (tenantTokens[selectedTenant]) {
+    headers.Authorization = `Bearer ${tenantTokens[selectedTenant]}`;
+  }
+  const response = http.get(`${baseUrl}${path}`, {
+    headers,
+    tags: {
+      benchmark_strategy: __ENV.BENCHMARK_STRATEGY || "unknown",
+      benchmark_scenario: __ENV.BENCHMARK_SCENARIO || "unknown",
+    },
+  });
+  tenantDemand.add(1, { tenant_id: tenantId });
+  if (
+    response.headers["X-Benchmark-Active-Strategy"] !==
+      (__ENV.BENCHMARK_STRATEGY || "unknown") ||
+    response.headers["X-Benchmark-Active-Config-Version"] !==
+      (__ENV.BENCHMARK_CONFIG_VERSION || "unknown")
+  ) {
+    strategyMismatches.add(1);
+  }
+
+  if (response.status === 429) {
+    rateLimited.add(1);
+  } else {
+    accepted.add(1);
+    acceptedLatency.add(response.timings.duration);
+    backendLatency.add(response.timings.duration);
+    tenantAccepted.add(1, { tenant_id: tenantId });
+    if (response.status >= 500) {
+      backendErrors.add(1);
+    } else if (response.status >= 200 && response.status < 400) {
+      successful.add(1);
+    }
+  }
+}

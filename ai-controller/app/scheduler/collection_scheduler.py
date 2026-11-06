@@ -15,6 +15,9 @@ from app.storage.repositories import TelemetryRepository
 from app.telemetry.aggregator import TelemetryAggregator
 from app.telemetry.collector import TelemetryCollector
 from app.telemetry.prometheus_client import PrometheusClient
+from app.rollback.rollback_service import scheduled_rollback_cycle
+from app.forecasting.metrics import REGISTRY
+from prometheus_client import start_http_server
 
 logger = logging.getLogger("ai_controller.collector")
 WORKER_ADVISORY_LOCK_ID = 8_194_330_175_010_151
@@ -158,6 +161,10 @@ async def run_worker(settings: Settings, engine: Engine) -> None:
         settings.collection_interval_seconds,
         len(settings.service_keys),
     )
+    if len(settings.policy_service_api_key) < 32:
+        logger.error(
+            "Scheduled rollback is disabled because the Policy Service API key is not configured"
+        )
 
     lock_connection = None
     while lock_connection is None:
@@ -206,6 +213,12 @@ async def run_worker(settings: Settings, engine: Engine) -> None:
                     collector,
                     aggregator,
                 )
+                if len(settings.policy_service_api_key) >= 32:
+                    await asyncio.to_thread(
+                        scheduled_rollback_cycle,
+                        settings,
+                        create_session_factory(engine),
+                    )
                 delay = settings.collection_interval_seconds - (
                     time.time() % settings.collection_interval_seconds
                 )
@@ -225,9 +238,16 @@ def main() -> None:
     )
     settings = Settings.from_env()
     engine = create_database_engine(settings)
+    metrics_server, metrics_thread = start_http_server(
+        8002,
+        addr="0.0.0.0",
+        registry=REGISTRY,
+    )
     try:
         asyncio.run(run_worker(settings, engine))
     finally:
+        metrics_server.shutdown()
+        metrics_thread.join()
         engine.dispose()
 
 

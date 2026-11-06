@@ -30,3 +30,13 @@ scrape_configs:
   - job_name: redis
     static_configs:
       - targets: ["redis-exporter:9121"]
+
+  - job_name: ai-controller
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ai-controller-forecast-worker:8001"]
+
+  - job_name: ai-controller-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ai-controller-worker:8002"]

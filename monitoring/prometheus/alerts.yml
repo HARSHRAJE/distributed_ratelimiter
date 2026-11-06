@@ -65,3 +65,23 @@ groups:
         annotations:
           summary: Policy reconciliation is delayed
           description: The oldest pending outbox event is more than five minutes old.
+
+  - name: adaptive-policy-rollback
+    rules:
+      - alert: AdaptivePolicyRollbackFailed
+        expr: increase(ai_controller_rollback_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: Adaptive policy rollback failed
+          description: A rollback did not complete safely; adaptive control remains paused for operator review.
+
+      - alert: AdaptiveControlCircuitBreakerOpen
+        expr: ai_controller_circuit_breaker_state{state="OPEN"} == 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: Adaptive control is blocked by its circuit breaker
+          description: The durable circuit breaker is OPEN for service {{ $labels.service_key }}; the current Gateway policy remains in effect.

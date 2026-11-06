@@ -360,6 +360,47 @@
       ],
       "title": "Orders Service backend errors",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "ai_controller_forecast_actual_rps",
+          "legendFormat": "{{service_key}} actual",
+          "refId": "A"
+        },
+        {
+          "expr": "ai_controller_forecast_predicted_rps",
+          "legendFormat": "{{service_key}} {{model}} +{{horizon_seconds}}s forecast",
+          "refId": "B"
+        }
+      ],
+      "title": "Observed and forecast incoming traffic",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
