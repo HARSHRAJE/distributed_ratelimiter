@@ -1,9 +1,11 @@
 import http from "k6/http";
-import { Counter, Trend } from "k6/metrics";
+import { Counter, Rate, Trend } from "k6/metrics";
 
 const successful = new Counter("benchmark_successful_requests");
 const rateLimited = new Counter("benchmark_rate_limited_requests");
 const backendErrors = new Counter("benchmark_backend_errors");
+const backendErrorRate = new Rate("benchmark_backend_error_rate");
+const rejectionRate = new Rate("benchmark_rejection_rate");
 const accepted = new Counter("benchmark_accepted_requests");
 const strategyMismatches = new Counter("benchmark_strategy_mismatches");
 const tenantDemand = new Counter("benchmark_tenant_demand");
@@ -31,6 +33,43 @@ const config = {
   thresholds: {},
 };
 
+if (__ENV.BENCHMARK_STRESS_PROFILE === "true") {
+  const maximum5xxRatio = Number(
+    __ENV.BENCHMARK_STRESS_MAX_5XX_RATIO || 0,
+  );
+  const maximum429Ratio = Number(
+    __ENV.BENCHMARK_STRESS_MAX_429_RATIO || 0,
+  );
+  config.thresholds = {
+    http_req_duration: [
+      {
+        threshold: `p(95)<${__ENV.BENCHMARK_STRESS_MAX_P95_MS}`,
+        abortOnFail: true,
+        delayAbortEval: "30s",
+      },
+      {
+        threshold: `p(99)<${__ENV.BENCHMARK_STRESS_MAX_P99_MS}`,
+        abortOnFail: true,
+        delayAbortEval: "30s",
+      },
+    ],
+    benchmark_backend_error_rate: [
+      {
+        threshold: `rate<${maximum5xxRatio === 0 ? 0.000001 : maximum5xxRatio}`,
+        abortOnFail: true,
+        delayAbortEval: "30s",
+      },
+    ],
+    benchmark_rejection_rate: [
+      {
+        threshold: `rate<${maximum429Ratio === 0 ? 0.000001 : maximum429Ratio}`,
+        abortOnFail: true,
+        delayAbortEval: "30s",
+      },
+    ],
+  };
+}
+
 export const options = config;
 
 export default function () {
@@ -53,7 +92,7 @@ export default function () {
       "X-Benchmark-Config-Version": __ENV.BENCHMARK_CONFIG_VERSION || "unknown",
   };
   if (tenantTokens[selectedTenant]) {
-    headers.Authorization = `Bearer ${tenantTokens[selectedTenant]}`;
+    headers.Authorization = "Bearer " + tenantTokens[selectedTenant];
   }
   const response = http.get(`${baseUrl}${path}`, {
     headers,
@@ -74,15 +113,21 @@ export default function () {
 
   if (response.status === 429) {
     rateLimited.add(1);
+    rejectionRate.add(true);
   } else {
+    rejectionRate.add(false);
     accepted.add(1);
     acceptedLatency.add(response.timings.duration);
     backendLatency.add(response.timings.duration);
     tenantAccepted.add(1, { tenant_id: tenantId });
     if (response.status >= 500) {
       backendErrors.add(1);
+      backendErrorRate.add(true);
     } else if (response.status >= 200 && response.status < 400) {
+      backendErrorRate.add(false);
       successful.add(1);
+    } else {
+      backendErrorRate.add(false);
     }
   }
 }

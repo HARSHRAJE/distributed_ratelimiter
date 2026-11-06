@@ -279,7 +279,8 @@ measured compliance.
 
 Apply `013_create_benchmarking.sql` after migrations `010`-`012`, then apply
 `014_add_benchmark_dropped_iterations.sql` and
-`015_add_policy_submission_timestamps.sql` (after `007_create_policy_executions.sql`):
+`015_add_policy_submission_timestamps.sql` (after `007_create_policy_executions.sql`),
+then `016_create_chaos_experiments.sql`:
 
 ```powershell
 $dbPasswordLine = Get-Content .\.env |
@@ -294,6 +295,22 @@ $sql | docker exec -i -e "PGPASSWORD=$env:PGPASSWORD" `
   adaptive-rate-limiter-postgres-1 psql -v ON_ERROR_STOP=1 `
   -U rate_limiter_app -d rate_limiter
 if ($LASTEXITCODE -ne 0) { throw 'Benchmark migration failed' }
+Remove-Item Env:PGPASSWORD
+```
+
+```powershell
+$dbPasswordLine = Get-Content .\.env |
+  Where-Object { $_ -match '^POSTGRES_PASSWORD=' } |
+  Select-Object -First 1
+$env:PGPASSWORD = $dbPasswordLine.Substring('POSTGRES_PASSWORD='.Length).Trim().Trim('"').Trim("'")
+$env:TZ = 'Asia/Kolkata'
+$sql = "BEGIN;`nSET LOCAL TIME ZONE 'Asia/Kolkata';`n" +
+  (Get-Content -Raw .\ai-controller\sql\016_create_chaos_experiments.sql) +
+  "`nCOMMIT;`n"
+$sql | docker exec -i -e "PGPASSWORD=$env:PGPASSWORD" `
+  adaptive-rate-limiter-postgres-1 psql -v ON_ERROR_STOP=1 `
+  -U rate_limiter_app -d rate_limiter
+if ($LASTEXITCODE -ne 0) { throw 'Chaos testing migration failed' }
 Remove-Item Env:PGPASSWORD
 ```
 
@@ -397,6 +414,69 @@ Use the returned run IDs with `GET /api/v1/benchmarks/{runId}` and
 or compare recent repeated batches with `repeats`. `GET
 /api/v1/benchmarks/history?service_key=orders-service` lists run history.
 These routes require `X-Internal-API-Key`.
+
+## Chaos testing (manual, authorized local Compose environment only)
+
+Chaos injection is disabled by default. Only CH-01 (Redis unavailable) is
+implemented; CH-02 through CH-10 are rejected with HTTP 501 and are not queued.
+The API only queues experiments. Run the separate worker manually on the host;
+it has no Docker socket in the API container and accepts no shell commands or
+service names from API requests.
+
+Before enabling it, use an isolated local Compose project with the approved
+`redis:7.4` service and configure a protected route that should fail closed
+with HTTP 503 when Redis is unavailable. Set
+`AI_CONTROLLER_CHAOS_ENABLED=true` and a unique
+`AI_CONTROLLER_CHAOS_TEST_ENVIRONMENT_ID` in the API environment. The API
+requires both `X-Internal-API-Key` and `X-Admin-API-Key` to queue a run; the
+administrator key must be at least 32 characters. On the host, configure the
+worker with that same test environment ID, a local
+`AI_CONTROLLER_CHAOS_COMPOSE_PROJECT_DIRECTORY`, an in-project
+`AI_CONTROLLER_CHAOS_COMPOSE_FILE`, the exact protected-route
+`AI_CONTROLLER_CHAOS_PROBE_URL`, and a matching host-and-port in
+`AI_CONTROLLER_CHAOS_ALLOWED_HOSTS`. Set ordinary database environment
+variables so the local worker can connect to PostgreSQL. Optionally set
+`AI_CONTROLLER_CHAOS_PROBE_AUTHORIZATION` to a test-only bearer authorization
+value; it is never persisted. Keep the environment ID and URL out of production
+configuration.
+
+After applying migration 016, start the API normally. In a separate host
+PowerShell session with the controller dependencies and database environment
+available, start the one-at-a-time worker:
+
+```powershell
+$env:AI_CONTROLLER_CHAOS_ENABLED = 'true'
+$env:AI_CONTROLLER_CHAOS_TEST_ENVIRONMENT_ID = 'local-chaos-test'
+$env:AI_CONTROLLER_CHAOS_COMPOSE_PROJECT_DIRECTORY = 'C:\path\to\isolated-test-compose'
+$env:AI_CONTROLLER_CHAOS_COMPOSE_FILE = 'compose.yaml'
+$env:AI_CONTROLLER_CHAOS_PROBE_URL = 'http://localhost:8080/protected-route'
+$env:AI_CONTROLLER_CHAOS_ALLOWED_HOSTS = 'localhost:8080'
+python -m app.chaos.chaos_worker
+```
+
+Submit only after verifying that all traffic in the configured route is test
+traffic. The request must match the configured environment ID, service key,
+and include both confirmation flags. Fault duration is bounded to 30 seconds
+and capped by `AI_CONTROLLER_CHAOS_FAULT_DURATION_SECONDS`. Before stopping
+Redis, the worker verifies the local Docker context, the Compose Redis image,
+and a healthy protected-route preflight. It always attempts to start Redis in
+the fault cleanup path; then it checks Redis `PING` and the protected route for
+up to 30 seconds. If the stop command fails ambiguously, the worker still
+attempts to start the fixed Redis service and verifies recovery. The worker
+rejects `DOCKER_HOST` overrides and requires a local named-pipe or Unix-socket
+daemon endpoint; a Docker context name alone is not treated as proof of locality.
+A failed recovery is recorded as unsuccessful. If the worker lease expires,
+the experiment is marked failed and the operator must verify Redis and route
+recovery manually before queuing another experiment.
+
+CH-01 records request status/latency samples, the confirmed Redis restart and
+route recovery, and whether the protected route returned 503 during the fault.
+Policy version and disabled-policy state are marked as not independently
+measured by CH-01; policy consistency is not inferred from Redis health. Token
+deduction atomicity, cross-replica Redis state, and bucket reconstruction also
+remain unverified without dedicated instrumentation. Do not treat this
+single-scenario implementation as evidence that the ten-scenario chaos
+milestone is complete. No automated test stops or restarts real containers.
 
 ## Metrics
 

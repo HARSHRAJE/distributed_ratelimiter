@@ -3,16 +3,35 @@ services:
   redis:
     image: redis:7.4
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAX_MEMORY:-1536mb}
+      - --maxmemory-policy
+      - noeviction
+      - --aclfile
+      - /run/redis-acl/users.acl
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+      - ${REDIS_ACL_FILE:-./security/redis/users.acl}:/run/redis-acl/users.acl:ro
+    environment:
+      REDIS_GATEWAY_PASSWORD: ${REDIS_GATEWAY_PASSWORD:?Set REDIS_GATEWAY_PASSWORD for health checks}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$$REDIS_GATEWAY_PASSWORD" redis-cli --user gateway ping
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: ${REDIS_CPU_LIMIT:-2}
+          memory: ${REDIS_MEMORY_LIMIT:-2G}
 
   postgres:
     image: postgres:17
@@ -30,17 +49,29 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: ${POSTGRES_CPU_LIMIT:-2}
+          memory: ${POSTGRES_MEMORY_LIMIT:-2G}
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.75.0
     restart: unless-stopped
     environment:
       REDIS_ADDR: redis://redis:6379
+      REDIS_USER: ${REDIS_MONITOR_USERNAME:-monitoring}
+      REDIS_PASSWORD: ${REDIS_MONITOR_PASSWORD:?Set REDIS_MONITOR_PASSWORD}
     ports:
       - "127.0.0.1:9121:9121"
     depends_on:
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: ${REDIS_EXPORTER_CPU_LIMIT:-0.25}
+          memory: ${REDIS_EXPORTER_MEMORY_LIMIT:-128M}
 
   prometheus:
     image: prom/prometheus:v3.5.0
@@ -59,6 +90,11 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - redis-exporter
+    deploy:
+      resources:
+        limits:
+          cpus: ${PROMETHEUS_CPU_LIMIT:-1}
+          memory: ${PROMETHEUS_MEMORY_LIMIT:-1G}
 
   ai-controller-api:
     build:
@@ -83,6 +119,8 @@ services:
       AI_CONTROLLER_POLICY_SERVICE_URL: ${AI_CONTROLLER_POLICY_SERVICE_URL:-http://host.docker.internal:8081}
       AI_CONTROLLER_POLICY_SERVICE_API_KEY: ${POLICY_EXECUTION_API_KEY:-}
       AI_CONTROLLER_ADMIN_API_KEY: ${AI_CONTROLLER_ADMIN_API_KEY:-}
+      AI_CONTROLLER_CHAOS_ENABLED: ${AI_CONTROLLER_CHAOS_ENABLED:-false}
+      AI_CONTROLLER_CHAOS_TEST_ENVIRONMENT_ID: ${AI_CONTROLLER_CHAOS_TEST_ENVIRONMENT_ID:-}
       AI_CONTROLLER_ROLLBACK_P95_THRESHOLD_MS: ${AI_CONTROLLER_ROLLBACK_P95_THRESHOLD_MS:-500}
       AI_CONTROLLER_ROLLBACK_P95_CONSECUTIVE_WINDOWS: ${AI_CONTROLLER_ROLLBACK_P95_CONSECUTIVE_WINDOWS:-3}
       AI_CONTROLLER_ROLLBACK_5XX_THRESHOLD_PERCENT: ${AI_CONTROLLER_ROLLBACK_5XX_THRESHOLD_PERCENT:-5}
@@ -110,6 +148,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: ${AI_CONTROLLER_API_CPU_LIMIT:-2}
+          memory: ${AI_CONTROLLER_API_MEMORY_LIMIT:-2G}
 
   ai-controller-worker:
     build:
@@ -151,6 +194,11 @@ services:
         condition: service_healthy
       prometheus:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: ${AI_CONTROLLER_WORKER_CPU_LIMIT:-1}
+          memory: ${AI_CONTROLLER_WORKER_MEMORY_LIMIT:-768M}
 
   ai-controller-forecast-worker:
     build:
@@ -169,6 +217,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: ${AI_CONTROLLER_FORECAST_CPU_LIMIT:-1}
+          memory: ${AI_CONTROLLER_FORECAST_MEMORY_LIMIT:-768M}
 
   ai-controller-benchmark-worker:
     profiles: ["benchmark"]
@@ -197,6 +250,11 @@ services:
         condition: service_healthy
       prometheus:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: ${AI_CONTROLLER_BENCHMARK_CPU_LIMIT:-2}
+          memory: ${AI_CONTROLLER_BENCHMARK_MEMORY_LIMIT:-2G}
 
   grafana:
     image: grafana/grafana:12.1.0
@@ -213,6 +271,11 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: ${GRAFANA_CPU_LIMIT:-1}
+          memory: ${GRAFANA_MEMORY_LIMIT:-512M}
 
 volumes:
   redis_data:

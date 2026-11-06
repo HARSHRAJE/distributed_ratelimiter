@@ -37,6 +37,42 @@ groups:
           summary: Redis exporter cannot reach Redis
           description: Redis exporter reports that Redis is unavailable.
 
+      - alert: RedisMemoryNearLimit
+        expr: redis_memory_max_bytes > 0 and redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis is nearing its configured memory limit
+          description: Redis uses more than 85% of its memory budget. With noeviction enabled, writes will fail closed rather than evict active rate-limit state.
+
+      - alert: RedisEvictedKeys
+        expr: increase(redis_evicted_keys_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis evicted keys
+          description: Redis reports key eviction; investigate memory policy and enforcement state immediately.
+
+      - alert: GatewayPolicyCacheNearLimit
+        expr: ratelimit_policy_cache_size / ratelimit_policy_cache_maximum > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Gateway policy cache is nearing its configured bound
+          description: Cache churn or cardinality may be increasing policy lookups to Redis.
+
+      - alert: GatewayObservedStalePolicyUpdate
+        expr: increase(ratelimit_policy_cache_stale_update_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Gateway rejected an older policy snapshot
+          description: A Redis policy read was older than the local versioned cache entry and was not used for enforcement.
+
   - name: policy-synchronization
     rules:
       - alert: PolicyOutboxEventsFailed

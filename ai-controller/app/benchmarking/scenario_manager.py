@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from app.benchmarking.schemas import BenchmarkScenario
+from app.benchmarking.schemas import BenchmarkScenario, CapacityProfile
 
 
 @dataclass(frozen=True)
@@ -20,9 +20,64 @@ class ScenarioManager:
         duration_seconds: int,
         start_rps: int,
         peak_rps: int,
+        capacity_profile: CapacityProfile | str | None = None,
     ) -> ScenarioPlan:
         duration = duration_seconds
         half = max(1, duration // 2)
+        if capacity_profile is not None:
+            profile = CapacityProfile(capacity_profile)
+            if profile == CapacityProfile.BASELINE:
+                return ScenarioPlan(
+                    stages=[{"duration": duration, "target": start_rps}]
+                )
+            if profile == CapacityProfile.LOAD:
+                return ScenarioPlan(
+                    stages=[{"duration": duration, "target": peak_rps}]
+                )
+            if profile == CapacityProfile.STRESS:
+                segment = duration // 4
+                remainder = duration % 4
+                stages = []
+                for step in range(1, 5):
+                    target = start_rps + (
+                        (peak_rps - start_rps) * step + 3
+                    ) // 4
+                    stages.append({
+                        "duration": segment + (1 if step <= remainder else 0),
+                        "target": target,
+                    })
+                return ScenarioPlan(
+                    stages=stages
+                )
+            if profile == CapacityProfile.SOAK:
+                return ScenarioPlan(
+                    stages=[{"duration": duration, "target": peak_rps}]
+                )
+            if profile == CapacityProfile.SPIKE:
+                baseline = max(1, duration * 2 // 5)
+                hold = max(1, duration // 5 - 2)
+                recovery = duration - baseline - hold - 2
+                return ScenarioPlan(
+                    stages=[
+                        {"duration": baseline, "target": start_rps},
+                        {"duration": 1, "target": peak_rps},
+                        {"duration": hold, "target": peak_rps},
+                        {"duration": 1, "target": start_rps},
+                        {"duration": recovery, "target": start_rps},
+                    ],
+                    recovery_start_seconds=baseline + hold + 2,
+                )
+            if profile == CapacityProfile.RECOVERY:
+                peak_duration = max(1, duration // 5)
+                recovery = duration - peak_duration - 1
+                return ScenarioPlan(
+                    stages=[
+                        {"duration": peak_duration, "target": peak_rps},
+                        {"duration": 1, "target": start_rps},
+                        {"duration": recovery, "target": start_rps},
+                    ],
+                    recovery_start_seconds=peak_duration + 1,
+                )
         if scenario == BenchmarkScenario.STEADY_TRAFFIC:
             stages = [{"duration": duration, "target": start_rps}]
         elif scenario == BenchmarkScenario.SUDDEN_SPIKE:

@@ -3,6 +3,7 @@ package com.ratelimiter.auth.config;
 import java.io.IOException;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -95,9 +96,33 @@ public class JwtConfig {
                     )
                 );
             }
+            if (!isUuid(jwt.getSubject())
+                    || !isUuid(jwt.getClaimAsString("tenant_id"))
+                    || jwt.getClaimAsStringList("roles") == null
+                    || jwt.getClaimAsStringList("roles").isEmpty()) {
+                return OAuth2TokenValidatorResult.failure(
+                    new OAuth2Error(
+                        "invalid_token",
+                        "A valid user, tenant, and role claim is required",
+                        null
+                    )
+                );
+            }
             return OAuth2TokenValidatorResult.success();
         });
         return decoder;
+    }
+
+    private static boolean isUuid(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     public record JwtKeyPair(

@@ -1,7 +1,11 @@
 server:
   port: 8080
+  shutdown: graceful
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
   application:
     name: rate-limiter-gateway
 
@@ -9,13 +13,31 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:gateway}
+      password: ${REDIS_PASSWORD:}
       connect-timeout: 2s
-      timeout: 2s
+      timeout: ${REDIS_COMMAND_TIMEOUT:100ms}
+      lettuce:
+        pool:
+          max-active: ${REDIS_POOL_MAX_ACTIVE:100}
+          max-idle: ${REDIS_POOL_MAX_IDLE:30}
+          min-idle: ${REDIS_POOL_MIN_IDLE:10}
+          max-wait: ${REDIS_POOL_MAX_WAIT:100ms}
+          time-between-eviction-runs: 30s
 
   cloud:
     gateway:
       server:
         webflux:
+          httpclient:
+            connect-timeout: ${GATEWAY_CONNECT_TIMEOUT_MS:2000}
+            response-timeout: ${GATEWAY_RESPONSE_TIMEOUT:30s}
+            pool:
+              type: fixed
+              max-connections: ${GATEWAY_MAX_CONNECTIONS:500}
+              acquire-timeout: ${GATEWAY_POOL_ACQUIRE_TIMEOUT_MS:1000}
+              max-idle-time: 30s
+              max-life-time: 5m
           routes:
             - id: orders-service-root
               uri: ${ORDERS_SERVICE_URI:http://localhost:8082}
@@ -53,6 +75,7 @@ security:
 gateway:
   rate-limit:
     policy-cache-ttl: ${RATE_LIMIT_POLICY_CACHE_TTL:1s}
+    policy-cache-max-entries: ${RATE_LIMIT_POLICY_CACHE_MAX_ENTRIES:100000}
 
 management:
   server:
@@ -64,6 +87,13 @@ management:
   endpoint:
     health:
       show-details: never
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,redis
   metrics:
     tags:
       application: ${spring.application.name}

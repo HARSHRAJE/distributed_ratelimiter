@@ -158,6 +158,21 @@ class RedisTokenBucketServiceTests {
     }
 
     @Test
+    void expiresIdleBucketAfterTheRefillHorizon() throws InterruptedException {
+        TokenBucketRequest request = request(1, 10, 1, 10, 1, 10);
+
+        service.consume(request).block(Duration.ofSeconds(2));
+
+        assertThat(redisTemplate.hasKey(request.tenant().key())
+            .block(Duration.ofSeconds(2))).isTrue();
+        Thread.sleep(150);
+        assertThat(redisTemplate.hasKey(request.tenant().key())
+            .block(Duration.ofSeconds(2))).isFalse();
+
+        delete(request);
+    }
+
+    @Test
     void concurrentCallsNeverOverspendAnyBucket() {
         TokenBucketRequest request = request(10, 0.001, 10, 0.001, 10, 0.001);
 

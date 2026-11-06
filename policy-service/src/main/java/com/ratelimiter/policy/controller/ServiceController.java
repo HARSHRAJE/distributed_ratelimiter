@@ -12,6 +12,7 @@ import com.ratelimiter.policy.dto.response.ServiceExecutionStatus;
 import com.ratelimiter.policy.dto.response.ServiceRollbackStatus;
 import com.ratelimiter.policy.dto.response.ExecutionKillSwitchStatus;
 import com.ratelimiter.policy.dto.response.ServiceResponse;
+import com.ratelimiter.policy.config.PolicyAuthorization;
 import com.ratelimiter.policy.redis.RedisServiceConfigReader;
 import com.ratelimiter.policy.service.ServiceManagementService;
 
@@ -21,6 +22,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
@@ -46,22 +50,30 @@ public class ServiceController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ServiceResponse create(
             @Valid @RequestBody CreateServiceRequest request) {
         return service.createService(request);
     }
 
     @GetMapping
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public List<ServiceResponse> getAll() {
         return service.getAllServices();
     }
 
     @GetMapping("/{id}")
-    public ServiceResponse getById(@PathVariable UUID id) {
-        return service.getService(id);
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'SERVICE_ADMIN')")
+    public ServiceResponse getById(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal Jwt jwt) {
+        ServiceResponse response = service.getService(id);
+        PolicyAuthorization.requireServiceAccess(jwt, response.serviceKey());
+        return response;
     }
 
     @PutMapping("/{id}/configuration")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ServiceResponse updateConfiguration(
             @PathVariable UUID id,
             @Valid @RequestBody UpdateServiceConfigRequest request) {
@@ -69,7 +81,11 @@ public class ServiceController {
     }
 
     @GetMapping("/by-key/{serviceKey}")
-    public ServiceResponse getByServiceKey(@PathVariable String serviceKey) {
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'SERVICE_ADMIN')")
+    public ServiceResponse getByServiceKey(
+            @PathVariable String serviceKey,
+            @AuthenticationPrincipal Jwt jwt) {
+        PolicyAuthorization.requireServiceAccess(jwt, serviceKey);
         return service.getServiceByKey(serviceKey);
     }
 

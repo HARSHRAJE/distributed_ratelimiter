@@ -14,11 +14,47 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class SecurityAuditEventRecord(Base):
+    __tablename__ = "security_audit_events"
+    __table_args__ = (
+        Index(
+            "idx_security_audit_tenant",
+            "tenant_id",
+            "created_at",
+        ),
+        Index(
+            "idx_security_audit_type",
+            "event_type",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    actor_id: Mapped[str | None] = mapped_column(String(128))
+    tenant_id: Mapped[str | None] = mapped_column(String(128))
+    service_key: Mapped[str | None] = mapped_column(String(100))
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String(128))
+    outcome: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_ip: Mapped[str | None] = mapped_column(
+        String(45).with_variant(INET(), "postgresql")
+    )
+    details: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
 
 
 class TelemetrySampleRecord(Base):

@@ -24,7 +24,7 @@ class TenantIdentityFilterTests {
         JwtAuthenticationToken authentication = authentication();
         MockServerWebExchange exchange = MockServerWebExchange
             .builder(MockServerHttpRequest.get("/api/orders")
-                .header("X-Tenant-Id", "client-tenant")
+                .header("X-Tenant-Id", "client-tenant", "conflicting-tenant")
                 .header("X-User-Id", "client-user")
                 .build())
             .principal(authentication)

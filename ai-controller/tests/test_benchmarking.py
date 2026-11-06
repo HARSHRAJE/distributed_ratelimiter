@@ -21,6 +21,7 @@ from app.benchmarking.schemas import (
     BenchmarkScenario,
     BenchmarkSloThresholds,
     BenchmarkStrategy,
+    CapacityProfile,
 )
 from app.config import Settings
 from app.main import create_app
@@ -133,6 +134,52 @@ def test_scenario_manager_profiles_are_bounded_and_distinct():
     assert all(int(stage["duration"]) <= 15 for stage in burst.stages)
 
 
+@pytest.mark.parametrize(
+    ("profile", "duration"),
+    [
+        (CapacityProfile.BASELINE, 300),
+        (CapacityProfile.LOAD, 600),
+        (CapacityProfile.SPIKE, 300),
+        (CapacityProfile.STRESS, 120),
+        (CapacityProfile.SOAK, 3600),
+        (CapacityProfile.RECOVERY, 600),
+    ],
+)
+def test_capacity_profiles_produce_bounded_repeatable_stages(profile, duration):
+    plan = ScenarioManager.build(
+        BenchmarkScenario.STEADY_TRAFFIC,
+        duration_seconds=duration,
+        start_rps=10,
+        peak_rps=100,
+        capacity_profile=profile,
+    )
+
+    assert sum(int(stage["duration"]) for stage in plan.stages) == duration
+    assert all(1 <= int(stage["duration"]) for stage in plan.stages)
+    if profile == CapacityProfile.STRESS:
+        assert [stage["target"] for stage in plan.stages] == [
+            33,
+            55,
+            78,
+            100,
+        ]
+    if profile == CapacityProfile.RECOVERY:
+        assert plan.recovery_start_seconds == 121
+
+
+def test_capacity_profile_duration_is_validated():
+    with pytest.raises(ValueError, match="BASELINE profile duration"):
+        request_model(
+            capacity_profile=CapacityProfile.BASELINE,
+            duration_seconds=60,
+        )
+    with pytest.raises(ValueError, match="SOAK profile duration"):
+        request_model(
+            capacity_profile=CapacityProfile.SOAK,
+            duration_seconds=600,
+        )
+
+
 def test_benchmark_request_requires_isolation_versions_and_actual_slos():
     with pytest.raises(ValueError, match="isolated_test_environment"):
         request_model(isolated_test_environment_confirmed=False)
@@ -195,6 +242,27 @@ def test_k6_summary_keeps_429_separate_from_backend_5xx():
     }
 
 
+def test_k6_summary_uses_measured_counter_rates_for_early_stop():
+    summary = {
+        "metrics": {
+            "http_reqs": {"values": {"count": 1000, "rate": 50}},
+            "benchmark_accepted_requests": {
+                "values": {"count": 900, "rate": 45},
+            },
+            "benchmark_successful_requests": {
+                "values": {"count": 880, "rate": 44},
+            },
+            "benchmark_strategy_mismatches": {"values": {"count": 0}},
+        }
+    }
+
+    metrics = K6Executor._metrics_from_summary(summary, 300)
+
+    assert metrics.incoming_rps == 50
+    assert metrics.accepted_rps == 45
+    assert metrics.successful_rps == 44
+
+
 def test_k6_summary_fails_when_strategy_is_not_confirmed():
     summary = {
         "metrics": {
@@ -238,6 +306,28 @@ def test_benchmark_repository_queues_all_strategies_and_rotates_order():
     assert claimed is not None
     assert claimed.status == "RUNNING"
     assert claimed.slo_thresholds["max_p95_latency_ms"] == 200
+
+
+def test_benchmark_repository_persists_capacity_profile():
+    engine = database()
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as session:
+        _, runs = BenchmarkRepository(session).enqueue(
+            request_model(
+                duration_seconds=300,
+                capacity_profile=CapacityProfile.BASELINE,
+            ),
+            git_commit="abc123",
+            k6_script_version="1",
+            route_paths=("/",),
+            now=NOW,
+        )
+
+    assert len(runs) == 3
+    assert all(
+        run.workload_parameters["capacity_profile"] == "BASELINE"
+        for run in runs
+    )
 
 
 @pytest.mark.asyncio

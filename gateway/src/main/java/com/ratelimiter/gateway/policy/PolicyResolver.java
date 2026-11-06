@@ -105,7 +105,13 @@ public class PolicyResolver {
                 config.getT1(),
                 config.getT2()
             ))
-            .doOnNext(cache::put)
+            .doOnNext(snapshot -> {
+                if (!cache.put(snapshot)) {
+                    throw new RateLimitConfigurationException(
+                        "Redis returned a stale policy snapshot"
+                    );
+                }
+            })
             .onErrorMap(
                 DataAccessException.class,
                 exception -> new RedisUnavailableException(

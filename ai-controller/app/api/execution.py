@@ -17,6 +17,7 @@ from app.execution.schemas import (
     ServiceControlResult,
 )
 from app.rollback.rollback_service import RollbackError, RollbackService
+from app.security.audit import record_security_event
 
 router = APIRouter(
     prefix="/api/v1/execution",
@@ -55,10 +56,26 @@ def execute_recommendation(
     session: Session = Depends(get_session),
 ) -> ExecutionResult:
     try:
-        return ExecutionService(request.app.state.settings).execute(
+        result = ExecutionService(request.app.state.settings).execute(
             recommendation_id,
             session=session,
         )
+        record_security_event(
+            session,
+            actor_id="AI_CONTROLLER",
+            tenant_id=None,
+            service_key=result.service_key,
+            event_type="POLICY_RECOMMENDATION_EXECUTION",
+            resource_id=str(result.recommendation_id),
+            outcome=result.status.value,
+            source_ip=(
+                request.client.host if request.client is not None else None
+            ),
+            details={
+                "resulting_policy_version": result.resulting_version,
+            },
+        )
+        return result
     except ExecutionRejected as error:
         if str(error) == "Recommendation not found":
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -140,11 +157,24 @@ def enable_service(
             session=session,
             manual_approval=payload.manual_approval,
         )
-        return RolloutManager(request.app.state.settings).enable(
+        result = RolloutManager(request.app.state.settings).enable(
             service_key,
             repository=ExecutionRepository(session),
             client=PolicyClient(request.app.state.settings),
         )
+        record_security_event(
+            session,
+            actor_id="ADMIN_API_KEY",
+            tenant_id=None,
+            service_key=service_key,
+            event_type="ADAPTIVE_EXECUTION_ENABLED",
+            resource_id=service_key,
+            outcome="ACCEPTED",
+            source_ip=(
+                request.client.host if request.client is not None else None
+            ),
+        )
+        return result
     except RolloutError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except RollbackError as error:
@@ -167,12 +197,26 @@ def disable_service(
     _require_admin(request, admin_key)
     _check_service_key(request, service_key)
     try:
-        return RolloutManager(request.app.state.settings).disable(
+        result = RolloutManager(request.app.state.settings).disable(
             service_key,
             manual_override=payload.manual_override,
             repository=ExecutionRepository(session),
             client=PolicyClient(request.app.state.settings),
         )
+        record_security_event(
+            session,
+            actor_id="ADMIN_API_KEY",
+            tenant_id=None,
+            service_key=service_key,
+            event_type="ADAPTIVE_EXECUTION_DISABLED",
+            resource_id=service_key,
+            outcome="ACCEPTED",
+            source_ip=(
+                request.client.host if request.client is not None else None
+            ),
+            details={"manual_override": payload.manual_override},
+        )
+        return result
     except RolloutError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except PolicyClientError as error:
@@ -193,6 +237,18 @@ def activate_emergency_kill_switch(
             repository=ExecutionRepository(session),
             client=PolicyClient(request.app.state.settings),
         )
+        record_security_event(
+            session,
+            actor_id="ADMIN_API_KEY",
+            tenant_id=None,
+            service_key=None,
+            event_type="GLOBAL_EXECUTION_KILL_SWITCH",
+            resource_id=None,
+            outcome="ACTIVATED" if active else "UNCHANGED",
+            source_ip=(
+                request.client.host if request.client is not None else None
+            ),
+        )
     except PolicyClientError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return {"active": active}
@@ -211,6 +267,18 @@ def deactivate_emergency_kill_switch(
             active=False,
             repository=ExecutionRepository(session),
             client=PolicyClient(request.app.state.settings),
+        )
+        record_security_event(
+            session,
+            actor_id="ADMIN_API_KEY",
+            tenant_id=None,
+            service_key=None,
+            event_type="GLOBAL_EXECUTION_KILL_SWITCH",
+            resource_id=None,
+            outcome="DEACTIVATED" if not active else "UNCHANGED",
+            source_ip=(
+                request.client.host if request.client is not None else None
+            ),
         )
     except RolloutError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

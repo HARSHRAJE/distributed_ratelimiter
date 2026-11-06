@@ -164,6 +164,7 @@ class BenchmarkMetricsCollector:
                 ),
                 "metrics_collection_errors": [
                     *collection_errors,
+                    *k6_metrics.metrics_collection_errors,
                     "redis hot-key behaviour is unavailable without an "
                     "approved key-level Redis instrumentation source",
                 ],

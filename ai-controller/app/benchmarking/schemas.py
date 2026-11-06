@@ -24,6 +24,15 @@ class BenchmarkScenario(str, Enum):
     POLICY_SYNC_DELAY = "POLICY_SYNC_DELAY"
 
 
+class CapacityProfile(str, Enum):
+    BASELINE = "BASELINE"
+    LOAD = "LOAD"
+    STRESS = "STRESS"
+    SPIKE = "SPIKE"
+    SOAK = "SOAK"
+    RECOVERY = "RECOVERY"
+
+
 FAULT_SCENARIOS = {
     BenchmarkScenario.BACKEND_DEGRADATION,
     BenchmarkScenario.REDIS_FAILURE,
@@ -56,7 +65,8 @@ class BenchmarkRequest(BaseModel):
     )
     strategies: list[BenchmarkStrategy] = Field(min_length=1, max_length=3)
     scenario: BenchmarkScenario
-    duration_seconds: int = Field(default=60, ge=10, le=3600)
+    duration_seconds: int = Field(default=60, ge=10, le=14400)
+    capacity_profile: CapacityProfile | None = None
     warmup_seconds: int = Field(default=10, ge=0, le=600)
     tenant_count: int = Field(default=10, ge=1, le=1000)
     start_rps: int = Field(default=10, ge=1, le=1000)
@@ -83,6 +93,40 @@ class BenchmarkRequest(BaseModel):
             )
         if self.peak_rps < self.start_rps:
             raise ValueError("peak_rps must be at least start_rps")
+        if self.capacity_profile is not None:
+            expected_durations = {
+                CapacityProfile.BASELINE: {300},
+                CapacityProfile.LOAD: {600},
+                CapacityProfile.SPIKE: {300},
+                CapacityProfile.RECOVERY: {600},
+            }
+            if (
+                self.capacity_profile in expected_durations
+                and self.duration_seconds
+                not in expected_durations[self.capacity_profile]
+            ):
+                expected = next(iter(
+                    expected_durations[self.capacity_profile]
+                ))
+                raise ValueError(
+                    f"{self.capacity_profile.value} profile duration must be "
+                    f"{expected} seconds"
+                )
+            if (
+                self.capacity_profile == CapacityProfile.SOAK
+                and not 3600 <= self.duration_seconds <= 14400
+            ):
+                raise ValueError(
+                    "SOAK profile duration must be between 3600 and "
+                    "14400 seconds"
+                )
+            if (
+                self.capacity_profile == CapacityProfile.STRESS
+                and self.duration_seconds < 60
+            ):
+                raise ValueError(
+                    "STRESS profile duration must be at least 60 seconds"
+                )
         if not self.isolated_test_environment_confirmed:
             raise ValueError(
                 "isolated_test_environment_confirmed must be true"

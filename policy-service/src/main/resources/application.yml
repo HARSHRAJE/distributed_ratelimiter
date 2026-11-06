@@ -13,6 +13,8 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:policy-service}
+      password: ${REDIS_PASSWORD:}
       connect-timeout: 2s
       timeout: 2s
 
@@ -26,6 +28,12 @@ policy:
   outbox:
     dispatcher:
       enabled: true
+
+security:
+  jwt:
+    public-key-location: ${AUTH_PUBLIC_KEY_LOCATION:file:./keys/auth-public.pem}
+    issuer: ${AUTH_ISSUER:http://localhost:8083}
+    audience: ${AUTH_AUDIENCE:rate-limiter-api}
 
 server:
   port: 8081

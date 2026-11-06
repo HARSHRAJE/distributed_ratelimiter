@@ -97,6 +97,18 @@ class Settings:
     benchmark_route_paths: tuple[str, ...] = ("/",)
     benchmark_tenant_tokens: tuple[str, ...] = ()
     benchmark_git_commit: str = "UNSPECIFIED"
+    chaos_enabled: bool = False
+    chaos_test_environment_id: str = ""
+    chaos_compose_project_directory: str = ""
+    chaos_compose_file: str = "compose.yaml"
+    chaos_probe_url: str = ""
+    chaos_probe_authorization: str = ""
+    chaos_fault_duration_seconds: int = 5
+    chaos_worker_poll_seconds: int = 2
+    chaos_allowed_hosts: tuple[str, ...] = (
+        "localhost:8080",
+        "host.docker.internal:8080",
+    )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -456,6 +468,44 @@ class Settings:
                 "AI_CONTROLLER_GIT_COMMIT",
                 "UNSPECIFIED",
             )[:80],
+            chaos_enabled=_boolean_from_env(
+                "AI_CONTROLLER_CHAOS_ENABLED",
+                False,
+            ),
+            chaos_test_environment_id=os.getenv(
+                "AI_CONTROLLER_CHAOS_TEST_ENVIRONMENT_ID",
+                "",
+            ),
+            chaos_compose_project_directory=os.getenv(
+                "AI_CONTROLLER_CHAOS_COMPOSE_PROJECT_DIRECTORY",
+                "",
+            ),
+            chaos_compose_file=os.getenv(
+                "AI_CONTROLLER_CHAOS_COMPOSE_FILE",
+                "compose.yaml",
+            ),
+            chaos_probe_url=os.getenv(
+                "AI_CONTROLLER_CHAOS_PROBE_URL",
+                "",
+            ),
+            chaos_probe_authorization=os.getenv(
+                "AI_CONTROLLER_CHAOS_PROBE_AUTHORIZATION",
+                "",
+            ),
+            chaos_fault_duration_seconds=int(
+                os.getenv("AI_CONTROLLER_CHAOS_FAULT_DURATION_SECONDS", "5")
+            ),
+            chaos_worker_poll_seconds=int(
+                os.getenv("AI_CONTROLLER_CHAOS_WORKER_POLL_SECONDS", "2")
+            ),
+            chaos_allowed_hosts=tuple(
+                host.strip().lower()
+                for host in os.getenv(
+                    "AI_CONTROLLER_CHAOS_ALLOWED_HOSTS",
+                    "localhost:8080,host.docker.internal:8080",
+                ).split(",")
+                if host.strip()
+            ),
         )
         if not 0 < settings.max_change_percent <= 100:
             raise ValueError("AI_CONTROLLER_MAX_CHANGE_PERCENT must be in (0, 100]")
@@ -571,6 +621,7 @@ class Settings:
         if (
             settings.benchmark_worker_poll_seconds < 1
             or settings.benchmark_max_duration_seconds < 1
+            or settings.benchmark_max_duration_seconds > 14400
             or not 1 <= settings.benchmark_max_rps <= 1000
             or not settings.benchmark_k6_binary
             or not settings.benchmark_allowed_hosts
@@ -581,4 +632,15 @@ class Settings:
             )
         ):
             raise ValueError("Invalid benchmark worker setting")
+        if (
+            settings.chaos_fault_duration_seconds < 1
+            or settings.chaos_fault_duration_seconds > 30
+            or settings.chaos_worker_poll_seconds < 1
+            or len(settings.chaos_test_environment_id) > 100
+            or (
+                settings.chaos_enabled
+                and not settings.chaos_test_environment_id
+            )
+        ):
+            raise ValueError("Invalid or incomplete chaos-test environment")
         return settings

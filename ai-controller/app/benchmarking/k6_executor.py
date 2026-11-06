@@ -61,6 +61,7 @@ class K6Executor:
             duration_seconds=run.duration_seconds,
             start_rps=run.start_rps,
             peak_rps=run.peak_rps,
+            capacity_profile=run.workload_parameters.get("capacity_profile"),
         )
         if run.warmup_seconds:
             await self._execute_phase(
@@ -76,7 +77,7 @@ class K6Executor:
             )
         with tempfile.TemporaryDirectory(prefix="ai-controller-k6-") as workdir:
             summary_path = str(Path(workdir) / "summary.json")
-            await self._execute_phase(
+            stopped_by_threshold = await self._execute_phase(
                 run,
                 stages=plan.stages,
                 summary_path=summary_path,
@@ -89,7 +90,13 @@ class K6Executor:
                 raise K6ExecutionError(
                     "k6 did not produce a valid summary"
                 ) from error
-        return self._metrics_from_summary(summary, run.duration_seconds)
+        metrics = self._metrics_from_summary(summary, run.duration_seconds)
+        if stopped_by_threshold:
+            metrics.metrics_collection_errors.append(
+                "k6 stress profile stopped early after a configured SLO "
+                "threshold breach"
+            )
+        return metrics
 
     async def _execute_phase(
         self,
@@ -98,7 +105,7 @@ class K6Executor:
         stages: list[dict[str, int | str]],
         summary_path: str | None,
         phase: str,
-    ) -> None:
+    ) -> bool:
         env = os.environ.copy()
         env.update(
             {
@@ -119,6 +126,23 @@ class K6Executor:
                 "BENCHMARK_ROUTE_PATHS": ",".join(self.route_paths),
                 "BENCHMARK_TENANT_TOKENS": json.dumps(
                     self.tenant_tokens
+                ),
+                "BENCHMARK_STRESS_PROFILE": str(
+                    phase == "measurement"
+                    and run.workload_parameters.get("capacity_profile")
+                    == "STRESS"
+                ).lower(),
+                "BENCHMARK_STRESS_MAX_P95_MS": str(
+                    run.slo_thresholds.max_p95_latency_ms
+                ),
+                "BENCHMARK_STRESS_MAX_P99_MS": str(
+                    run.slo_thresholds.max_p99_latency_ms
+                ),
+                "BENCHMARK_STRESS_MAX_5XX_RATIO": str(
+                    run.slo_thresholds.max_backend_error_ratio
+                ),
+                "BENCHMARK_STRESS_MAX_429_RATIO": str(
+                    run.slo_thresholds.max_rejection_ratio
                 ),
             }
         )
@@ -149,11 +173,19 @@ class K6Executor:
             await process.wait()
             raise K6ExecutionError("k6 benchmark exceeded its timeout") from error
         if process.returncode != 0:
+            if (
+                process.returncode == 99
+                and phase == "measurement"
+                and summary_path is not None
+                and Path(summary_path).is_file()
+            ):
+                return True
             detail = (stderr or stdout).decode(errors="replace")[-500:]
             raise K6ExecutionError(
                 f"k6 {phase} phase failed with exit code "
                 f"{process.returncode}: {detail.strip()}"
             )
+        return False
 
     @staticmethod
     def _metrics_from_summary(
@@ -197,12 +229,18 @@ class K6Executor:
         accepted = number(
             values("benchmark_accepted_requests").get("count")
         ) or 0
+        accepted_rate = number(
+            values("benchmark_accepted_requests").get("rate")
+        )
         dropped_iterations = number(
             values("dropped_iterations").get("count")
         )
         successful = number(
             values("benchmark_successful_requests").get("count")
         ) or 0
+        successful_rate = number(
+            values("benchmark_successful_requests").get("rate")
+        )
         fairness_details = _tenant_fairness_details(
             metrics,
             duration_seconds=duration_seconds,
@@ -220,8 +258,16 @@ class K6Executor:
         )
         return BenchmarkMetrics(
             incoming_rps=number(requests.get("rate")),
-            accepted_rps=accepted / duration_seconds,
-            successful_rps=successful / duration_seconds,
+            accepted_rps=(
+                accepted_rate
+                if accepted_rate is not None
+                else accepted / duration_seconds
+            ),
+            successful_rps=(
+                successful_rate
+                if successful_rate is not None
+                else successful / duration_seconds
+            ),
             p50_latency_ms=number(
                 values("benchmark_accepted_latency_ms").get("med")
             ),

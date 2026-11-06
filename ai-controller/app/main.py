@@ -15,6 +15,7 @@ from app.api.allocation import router as allocation_router
 from app.api.route_allocation import router as route_allocation_router
 from app.api.sla import router as sla_router
 from app.api.benchmarks import router as benchmarks_router
+from app.api.chaos import router as chaos_router
 from app.config import Settings
 from app.forecasting.metrics import REGISTRY
 from app.storage.database import create_database_engine, create_session_factory
@@ -43,6 +44,7 @@ def create_app(
     app.include_router(route_allocation_router)
     app.include_router(sla_router)
     app.include_router(benchmarks_router)
+    app.include_router(chaos_router)
 
     @app.get("/metrics", include_in_schema=False)
     def metrics() -> Response:

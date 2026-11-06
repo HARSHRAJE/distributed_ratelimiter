@@ -61,6 +61,11 @@ class BenchmarkRepository:
                     "tenant_count": request.tenant_count,
                     "start_rps": request.start_rps,
                     "peak_rps": request.peak_rps,
+                    "capacity_profile": (
+                        request.capacity_profile.value
+                        if request.capacity_profile is not None
+                        else None
+                    ),
                     "route_paths": list(route_paths),
                 },
                 error=None,

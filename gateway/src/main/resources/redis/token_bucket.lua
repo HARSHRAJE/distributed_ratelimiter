@@ -103,6 +103,11 @@ for index = 1, 3 do
         'tokens', string.format('%.0f', tokens[index]),
         'last_refill_ms', string.format('%.0f', last_refill[index])
     )
+    local ttl_ms = math.max(
+        1,
+        math.ceil(capacities[index] / refill_rates[index])
+    )
+    redis.call('PEXPIRE', KEYS[index], ttl_ms)
 end
 
 return table.concat({
