@@ -1,0 +1,184 @@
+name: Test and deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - gateway/**
+      - auth-service/**
+      - orders-service/**
+      - policy-service/**
+      - ai-controller/**
+      - .github/workflows/deploy-gcp.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - gateway/**
+      - auth-service/**
+      - orders-service/**
+      - policy-service/**
+      - ai-controller/**
+      - .github/workflows/deploy-gcp.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gcp-demo-deployment
+  cancel-in-progress: false
+
+jobs:
+  test-java:
+    name: Test ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - gateway
+          - auth-service
+          - orders-service
+          - policy-service
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.8.2"
+
+      - name: Run tests
+        run: gradle -p "${{ matrix.project }}" test
+
+  test-ai-controller:
+    name: Test AI Controller
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-controller/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r ai-controller/requirements.txt
+
+      - name: Run tests
+        run: python -m pytest ai-controller/tests
+
+  build-images:
+    name: Build ${{ matrix.service }}
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs:
+      - test-java
+      - test-ai-controller
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gateway
+            context: gateway
+            image: us-central1-docker.pkg.dev/bold-mantis-463806-q5/rate-limiter/gateway
+          - service: auth-service
+            context: auth-service
+            image: us-central1-docker.pkg.dev/bold-mantis-463806-q5/rate-limiter/auth-service
+          - service: orders-service
+            context: orders-service
+            image: us-central1-docker.pkg.dev/bold-mantis-463806-q5/rate-limiter/orders-service
+          - service: policy-service
+            context: policy-service
+            image: us-central1-docker.pkg.dev/bold-mantis-463806-q5/rate-limiter/policy-service
+          - service: ai-controller-api
+            context: ai-controller
+            image: us-central1-docker.pkg.dev/bold-mantis-463806-q5/rate-limiter/ai-controller-api
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/607653541134/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: github-actions-deployer@bold-mantis-463806-q5.iam.gserviceaccount.com
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: bold-mantis-463806-q5
+
+      - name: Configure Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:${{ github.sha }}
+            ${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    name: Deploy all Cloud Run services
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs:
+      - build-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/607653541134/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: github-actions-deployer@bold-mantis-463806-q5.iam.gserviceaccount.com
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: bold-mantis-463806-q5
+
+      - name: Deploy images
+        env:
+          IMAGE_PREFIX: us-central1-docker.pkg.dev/bold-mantis-463806-q5/rate-limiter
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for service in gateway auth-service orders-service policy-service ai-controller-api; do
+            gcloud run services update "$service" \
+              --image="$IMAGE_PREFIX/$service:$IMAGE_TAG" \
+              --region=us-central1 \
+              --project=bold-mantis-463806-q5 \
+              --quiet
+          done
+
+      - name: Verify Gateway health
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail \
+            --retry 12 --retry-all-errors --retry-delay 5 --max-time 180 \
+            https://gateway-607653541134.us-central1.run.app/actuator/health \
+            | jq --exit-status '.status == "UP"'
