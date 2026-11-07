@@ -14,5 +14,7 @@ public interface TenantMembershipRepository
         UUID tenantId
     );
 
+    boolean existsByRole(String role);
+
     List<TenantMembershipEntity> findByUserId(UUID userId);
 }

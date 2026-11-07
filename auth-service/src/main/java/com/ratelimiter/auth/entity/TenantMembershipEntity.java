@@ -24,6 +24,17 @@ public class TenantMembershipEntity {
 
     protected TenantMembershipEntity() {}
 
+    public TenantMembershipEntity(
+            UUID id,
+            UUID userId,
+            UUID tenantId,
+            String role) {
+        this.id = id;
+        this.userId = userId;
+        this.tenantId = tenantId;
+        this.role = role;
+    }
+
     public UUID getId() { return id; }
     public UUID getUserId() { return userId; }
     public UUID getTenantId() { return tenantId; }

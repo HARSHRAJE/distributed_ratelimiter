@@ -25,6 +25,13 @@ public class TenantEntity {
 
     protected TenantEntity() {}
 
+    public TenantEntity(UUID id, String tenantKey, String name) {
+        this.id = id;
+        this.tenantKey = tenantKey;
+        this.name = name;
+        this.createdAt = Instant.now();
+    }
+
     public UUID getId() { return id; }
     public String getTenantKey() { return tenantKey; }
     public String getName() { return name; }

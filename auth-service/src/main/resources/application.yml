@@ -17,6 +17,8 @@ server:
   port: 8083
 
 auth:
+  admin:
+    bootstrap-token: ${AUTH_ADMIN_BOOTSTRAP_TOKEN:}
   jwt:
     issuer: ${AUTH_ISSUER:http://localhost:8083}
     audience: ${AUTH_AUDIENCE:rate-limiter-api}

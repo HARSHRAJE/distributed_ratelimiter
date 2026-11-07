@@ -41,4 +41,8 @@ public class UserEntity {
     public String getPasswordHash() { return passwordHash; }
     public boolean isEnabled() { return enabled; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public void updatePasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
 }

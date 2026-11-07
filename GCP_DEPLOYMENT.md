@@ -93,11 +93,38 @@ shared Postman workspace or exported collection.
    already exists, skip registration. Use the Gateway `baseUrl`, not the
    internal Auth Service URL; direct requests to Auth from a public
    workstation return Cloud Run 404.
-3. **Provisioning prerequisite** — an authorized operator must create or
-   select a tenant, add a membership for this user, and configure active
-   `orders-service` policies as described below. Until then, login or the
-   rate-limited orders route cannot complete successfully. The Google Cloud
-   account used to deploy is not automatically an application user.
+3. **Create the first application administrator** — GCP deployment does not
+   create an application user, and the Google Cloud account is not
+   automatically an application admin. Register the account that should
+   become the first admin, then retrieve the one-time bootstrap token in a
+   trusted PowerShell session:
+
+   ```powershell
+   gcloud secrets versions access latest `
+     --secret=rate-limiter-admin-bootstrap-token `
+     --project=bold-mantis-463806-q5
+   ```
+
+   In Postman send `POST {{baseUrl}}/api/v1/auth/admin/bootstrap` with header
+   `X-Admin-Bootstrap-Token: <token>` and Body → raw → JSON:
+
+   ```json
+   {
+     "email": "{{testEmail}}",
+     "initialPassword": "{{testPassword}}",
+     "tenantKey": "demo-admin",
+     "tenantName": "Demo Admin Tenant"
+   }
+   ```
+
+   `initialPassword` becomes the admin's login password. Expect `201` with the
+   created tenant and a `SUPER_ADMIN` membership for the registered user.
+   Save the returned `tenant.tenantId` to `tenantId`. This
+   endpoint is not a normal admin API: it accepts the secret only while no
+   `SUPER_ADMIN` membership exists, serializes simultaneous bootstrap attempts,
+   and returns `409` after it has been used. The Gateway permits this specific
+   route without a JWT; the Auth Service validates the bootstrap token. Keep
+   the token secret; never add it to a shared Postman collection or workspace.
 4. **Log in** — `POST {{baseUrl}}/api/v1/auth/login`, Body → raw → JSON:
 
    ```json
@@ -131,6 +158,35 @@ shared Postman workspace or exported collection.
 Auth routes also include `POST /api/v1/auth/select-tenant` (Bearer token plus
 refresh cookie, JSON `{"tenantId":"<another-membership-tenant-uuid>"}`), which
 rotates the session into another tenant for which the user has membership.
+
+### Admin tenant and membership endpoints
+
+After bootstrap, send the admin's access token as **Authorization → Bearer
+Token** on both endpoints below. They require the `SUPER_ADMIN` role; regular
+tenant roles receive `403`.
+
+| Method and URL | JSON body | Description |
+|---|---|---|
+| `POST {{baseUrl}}/api/v1/auth/admin/tenants` | `{"tenantKey":"customer-a","name":"Customer A"}` | Create a tenant; expect `201` and save `tenantId` |
+| `POST {{baseUrl}}/api/v1/auth/admin/tenants/{{tenantId}}/memberships` | `{"userId":"<user UUID from registration>","role":"TENANT_ADMIN"}` | Add a registered user to that tenant; expect `201` |
+
+Membership roles accepted are `SUPER_ADMIN`, `SERVICE_ADMIN`, `TENANT_ADMIN`,
+and `TENANT_MEMBER`. Assign `SUPER_ADMIN` sparingly. Users must register
+through `/api/v1/auth/register` before an admin can add them to a tenant.
+Use the returned tenant UUID as the `tenantId` in login and when creating
+that tenant's rate-limit policies. Duplicate tenant keys and memberships
+return `409`; unknown tenant or user IDs return `404`.
+
+After confirming the first admin can log in, you can disable the bootstrap
+path by removing its secret reference from Auth Service. This does not disable
+normal admin endpoints:
+
+```powershell
+gcloud run services update auth-service `
+  --remove-secrets=AUTH_ADMIN_BOOTSTRAP_TOKEN `
+  --region=us-central1 `
+  --project=bold-mantis-463806-q5
+```
 
 ### B. Test rate-limited Orders calls
 
@@ -240,11 +296,10 @@ minimum setup is:
    time for synchronization, then test `GET /api/v1/policies` with the
    `serviceKey`, `tenantId`, and route ID query parameters.
 
-This deployment does not expose a public admin API for provisioning tenants,
-memberships, services, or policies. An authorized operator must provision
-them through the internal service/database path. Never put database
-credentials, Secret Manager values, internal API keys, or administrator keys
-in a shared Postman collection.
+Tenant and membership provisioning is available through the
+`SUPER_ADMIN`-protected Auth endpoints above. Policy Service and AI Controller
+remain internal-only. Never put database credentials, Secret Manager values,
+internal API keys, or the bootstrap token in a shared Postman collection.
 
 ### AI Controller API (internal)
 
