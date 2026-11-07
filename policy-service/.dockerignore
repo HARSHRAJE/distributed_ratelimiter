@@ -1,0 +1,7 @@
+.git
+.gradle
+build
+bin
+keys
+*.pem
+*.log
