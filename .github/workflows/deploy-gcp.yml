@@ -168,11 +168,20 @@ jobs:
         run: |
           set -euo pipefail
           for service in gateway auth-service orders-service policy-service ai-controller-api; do
-            gcloud run services update "$service" \
-              --image="$IMAGE_PREFIX/$service:$IMAGE_TAG" \
-              --region=us-central1 \
-              --project=bold-mantis-463806-q5 \
-              --quiet
+            if [[ "$service" == "gateway" ]]; then
+              gcloud run services update "$service" \
+                --image="$IMAGE_PREFIX/$service:$IMAGE_TAG" \
+                --update-env-vars=AI_CONTROLLER_URI=https://ai-controller-api-607653541134.us-central1.run.app \
+                --region=us-central1 \
+                --project=bold-mantis-463806-q5 \
+                --quiet
+            else
+              gcloud run services update "$service" \
+                --image="$IMAGE_PREFIX/$service:$IMAGE_TAG" \
+                --region=us-central1 \
+                --project=bold-mantis-463806-q5 \
+                --quiet
+            fi
           done
 
       - name: Verify Gateway health

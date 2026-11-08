@@ -73,6 +73,12 @@ spring:
               uri: ${POLICY_SERVICE_URI:http://localhost:8081}
               predicates:
                 - Path=/api/v1/policies,/api/v1/policies/**
+            - id: ai-controller-api
+              uri: ${AI_CONTROLLER_URI:http://localhost:8000}
+              predicates:
+                - Path=/ai-controller,/ai-controller/**
+              filters:
+                - StripPrefix=1
 
 security:
   jwt:

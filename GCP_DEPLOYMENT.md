@@ -22,9 +22,9 @@ It reports `UP` when checked.
 
 Only the Gateway URL is intended for Postman from the public internet. The
 other listed URLs use internal ingress; calling them directly from Postman
-returns a Cloud Run 404. Use the Gateway URL for registration, login, and
-Orders requests. Its Auth route forwards `/api/v1/auth/**` to the internal
-Auth Service.
+returns a Cloud Run 404. Use the Gateway URL for Auth, Orders, Policy, and AI
+Controller requests. The Gateway forwards requests to the internal services;
+their Cloud Run URLs are not public API entry points.
 
 The Gateway and AI Controller use Direct VPC egress with all traffic routed
 through the VPC, and Private Google Access is enabled on the `us-central1`
@@ -211,10 +211,9 @@ demo tiers and have ongoing costs.
 ## Other API endpoints and access
 
 The following services have internal Cloud Run ingress. Their `run.app` URLs
-are not public Postman endpoints. Policy Service management APIs are available
-through the public Gateway, which forwards authenticated requests to the
-internal service; do not make Policy Service public. AI Controller is not
-proxied by the Gateway. `gcloud run services proxy` also cannot reach an
+are not public Postman endpoints. Their APIs are proxied through the public
+Gateway, which forwards requests to the internal services; do not make these
+Cloud Run services public. `gcloud run services proxy` also cannot reach an
 internal-only service from a workstation outside its VPC.
 
 ### Policy Service (internal)
@@ -305,15 +304,23 @@ service registration requires `SUPER_ADMIN`, while creating policies requires
 
 Tenant and membership provisioning is available through the
 `SUPER_ADMIN`-protected Auth endpoints above. Policy Service and AI Controller
-remain internal-only. Never put database credentials, Secret Manager values,
-internal API keys, or the bootstrap token in a shared Postman collection.
+remain internal-only and are accessed through the Gateway. Never put database
+credentials, Secret Manager values, internal API keys, or the bootstrap token
+in a shared Postman collection.
 
-### AI Controller API (internal)
+### AI Controller API (through the Gateway)
 
-The API root is `/api/v1`. Its interactive schema is `/docs` when accessed
-from an authorized network. Except for `GET /health`, its API routers require
-`X-Internal-API-Key`. Some execution and circuit-breaker controls additionally
-require `X-Admin-API-Key`. These secrets are not the user's login token.
+Use the Gateway prefix `/ai-controller`. For example, the health check is
+`GET {{baseUrl}}/ai-controller/health`, API requests use
+`{{baseUrl}}/ai-controller/api/v1/...`, and the interactive schema is
+`{{baseUrl}}/ai-controller/docs`. The Gateway forwards these paths to the
+internal AI Controller after removing the `/ai-controller` prefix.
+
+The Gateway requires an application access token for these requests. Except
+for `GET /health`, AI Controller API routers also require
+`X-Internal-API-Key`; some execution and circuit-breaker controls additionally
+require `X-Admin-API-Key`. These service keys are separate from the user's
+login token and must be kept secret.
 
 | Endpoint group | Main endpoints | Purpose |
 |---|---|---|
