@@ -13,7 +13,7 @@ services use internal ingress.
 | Gateway (public entry point) | https://gateway-607653541134.us-central1.run.app |
 | Auth Service (internal) | https://auth-service-607653541134.us-central1.run.app |
 | Orders Service (internal) | https://orders-service-607653541134.us-central1.run.app |
-| Policy Service (internal) | https://policy-service-607653541134.us-central1.run.app |
+| Policy Service (internal; use Gateway for Postman) | https://policy-service-607653541134.us-central1.run.app |
 | AI Controller API (internal) | https://ai-controller-api-607653541134.us-central1.run.app |
 
 The Gateway health endpoint is
@@ -211,9 +211,11 @@ demo tiers and have ongoing costs.
 ## Other API endpoints and access
 
 The following services have internal Cloud Run ingress. Their `run.app` URLs
-are not public Postman endpoints, and the Gateway does not proxy these paths.
-Do not change ingress to public just for testing. `gcloud run services proxy`
-also cannot reach an internal-only service from a workstation outside its VPC.
+are not public Postman endpoints. Policy Service management APIs are available
+through the public Gateway, which forwards authenticated requests to the
+internal service; do not make Policy Service public. AI Controller is not
+proxied by the Gateway. `gcloud run services proxy` also cannot reach an
+internal-only service from a workstation outside its VPC.
 
 ### Policy Service (internal)
 
@@ -254,11 +256,14 @@ require `X-Policy-Service-Key`; they are not part of the manual Postman smoke
 test. Adaptive configuration/rollback paths are also subject to execution
 state and version checks.
 
-For an authorized operator with access to the internal Policy Service, the
-minimum setup is:
+For Postman, use the public Gateway base URL and include the admin access
+token as a Bearer token. The Policy Service still enforces its role checks:
+service registration requires `SUPER_ADMIN`, while creating policies requires
+`SUPER_ADMIN` or `SERVICE_ADMIN`. The minimum setup is:
 
 1. If `orders-service` is not already registered, send
-   `POST /api/v1/services` with an operator JWT having `SUPER_ADMIN`:
+   `POST {{baseUrl}}/api/v1/services` with an operator JWT having
+   `SUPER_ADMIN`:
 
    ```json
    {
@@ -271,10 +276,12 @@ minimum setup is:
 
    These are illustrative demo values, not recommended production limits.
    Keep global refill rate at or below the hard maximum. If the service
-   already exists, use `GET /api/v1/services` instead of creating it again.
+   already exists, use `GET {{baseUrl}}/api/v1/services` instead of creating
+   it again.
 2. For each of `get-orders` and `create-order`, send `POST /api/v1/policies`
-   with an operator JWT having `SERVICE_ADMIN` or `SUPER_ADMIN`. Replace the
-   tenant UUID and tune capacities/refill rates for your demo:
+   through `{{baseUrl}}` with an operator JWT having `SERVICE_ADMIN` or
+   `SUPER_ADMIN`. Replace the tenant UUID and tune capacities/refill rates
+   for your demo:
 
    ```json
    {
@@ -337,6 +344,8 @@ expected to have data in this deployment.
 - Cloud SQL: PostgreSQL 17, `db-f1-micro`, 10 GiB SSD, private IP.
 - Memorystore: Basic tier, 1 GiB Redis 7.2, private networking, AUTH, and
   server-authenticated TLS.
+- Policy Service uses a 10-second Redis command timeout so TLS connection
+  initialization and policy snapshot publication can complete reliably.
 - Application credentials and signing keys are stored in Secret Manager.
 
 Cloud Run services are configured to scale to zero and use small maximum

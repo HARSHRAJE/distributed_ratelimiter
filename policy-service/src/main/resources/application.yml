@@ -16,7 +16,7 @@ spring:
       username: ${REDIS_USERNAME:policy-service}
       password: ${REDIS_PASSWORD:}
       connect-timeout: 2s
-      timeout: 2s
+      timeout: ${REDIS_COMMAND_TIMEOUT:10s}
 
   jpa:
     hibernate:
