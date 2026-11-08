@@ -8,6 +8,8 @@
 **/keys/
 **/*.pem
 **/*.key
+!gateway/src/test/resources/keys/
+!gateway/src/test/resources/keys/test-auth-public.pem
 
 # Generated Java, Gradle, and Python artifacts
 .gradle/
