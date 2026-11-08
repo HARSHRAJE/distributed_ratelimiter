@@ -78,7 +78,9 @@ shared Postman workspace or exported collection.
 
 1. **Gateway health** — `GET {{baseUrl}}/actuator/health`, no authorization.
    Expect `200` and `{"groups":["liveness","readiness"],"status":"UP"}`.
-2. **Register a test user** — `POST {{baseUrl}}/api/v1/auth/register`,
+2. **Create the initial admin account** — The first `SUPER_ADMIN` must be
+   registered before bootstrap. Send
+   `POST {{baseUrl}}/api/v1/auth/register`,
    Body → raw → JSON:
 
    ```json
@@ -90,9 +92,12 @@ shared Postman workspace or exported collection.
 
    Expect `201`. Password must be 12–72 characters. Registration creates a
    user only; it does not create a tenant or tenant membership. If the user
-   already exists, skip registration. Use the Gateway `baseUrl`, not the
-   internal Auth Service URL; direct requests to Auth from a public
-   workstation return Cloud Run 404.
+   already exists, skip registration. After the first admin is bootstrapped,
+   a `SUPER_ADMIN` can create both a user and their tenant membership using
+   the admin endpoint below; a separate public registration request is not
+   needed for those users. Use the Gateway `baseUrl`, not the internal Auth
+   Service URL; direct requests to Auth from a public workstation return
+   Cloud Run 404.
 3. **Create the first application administrator** — GCP deployment does not
    create an application user, and the Google Cloud account is not
    automatically an application admin. Register the account that should
@@ -162,20 +167,24 @@ rotates the session into another tenant for which the user has membership.
 ### Admin tenant and membership endpoints
 
 After bootstrap, send the admin's access token as **Authorization → Bearer
-Token** on both endpoints below. They require the `SUPER_ADMIN` role; regular
+Token** on the endpoints below. They require the `SUPER_ADMIN` role; regular
 tenant roles receive `403`.
 
 | Method and URL | JSON body | Description |
 |---|---|---|
 | `POST {{baseUrl}}/api/v1/auth/admin/tenants` | `{"tenantKey":"customer-a","name":"Customer A"}` | Create a tenant; expect `201` and save `tenantId` |
+| `POST {{baseUrl}}/api/v1/auth/admin/tenants/{{tenantId}}/users` | `{"email":"new-user@example.com","password":"{{initialUserPassword}}","role":"TENANT_MEMBER"}` | Create a user and add them to this tenant in one operation; expect `201` |
 | `POST {{baseUrl}}/api/v1/auth/admin/tenants/{{tenantId}}/memberships` | `{"userId":"<user UUID from registration>","role":"TENANT_ADMIN"}` | Add a registered user to that tenant; expect `201` |
 
 Membership roles accepted are `SUPER_ADMIN`, `SERVICE_ADMIN`, `TENANT_ADMIN`,
-and `TENANT_MEMBER`. Assign `SUPER_ADMIN` sparingly. Users must register
-through `/api/v1/auth/register` before an admin can add them to a tenant.
-Use the returned tenant UUID as the `tenantId` in login and when creating
-that tenant's rate-limit policies. Duplicate tenant keys and memberships
-return `409`; unknown tenant or user IDs return `404`.
+and `TENANT_MEMBER`. Assign `SUPER_ADMIN` sparingly. The create-user endpoint
+hashes the supplied password and creates the user and membership atomically;
+it never returns the password. Give the initial password to the user through
+a secure channel. Users created this way can log in immediately. Alternatively,
+users can register through `/api/v1/auth/register` and then be added with the
+membership endpoint. Use the returned tenant UUID as the `tenantId` in login
+and when creating that tenant's rate-limit policies. Duplicate tenant keys,
+emails, and memberships return `409`; unknown tenant or user IDs return `404`.
 
 After confirming the first admin can log in, you can disable the bootstrap
 path by removing its secret reference from Auth Service. This does not disable

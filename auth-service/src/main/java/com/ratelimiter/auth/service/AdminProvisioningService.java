@@ -2,6 +2,8 @@ package com.ratelimiter.auth.service;
 
 import com.ratelimiter.auth.dto.AdminBootstrapRequest;
 import com.ratelimiter.auth.dto.AdminBootstrapResponse;
+import com.ratelimiter.auth.dto.AdminCreateUserRequest;
+import com.ratelimiter.auth.dto.AdminUserResponse;
 import com.ratelimiter.auth.dto.CreateMembershipRequest;
 import com.ratelimiter.auth.dto.CreateTenantRequest;
 import com.ratelimiter.auth.dto.MembershipResponse;
@@ -9,6 +11,7 @@ import com.ratelimiter.auth.dto.TenantResponse;
 import com.ratelimiter.auth.entity.TenantEntity;
 import com.ratelimiter.auth.entity.TenantMembershipEntity;
 import com.ratelimiter.auth.entity.UserEntity;
+import com.ratelimiter.auth.exception.EmailAlreadyRegisteredException;
 import com.ratelimiter.auth.repository.TenantMembershipRepository;
 import com.ratelimiter.auth.repository.TenantRepository;
 import com.ratelimiter.auth.repository.UserRepository;
@@ -72,6 +75,43 @@ public class AdminProvisioningService {
                 "User not found"
             ));
         return toResponse(saveMembership(user, tenant, request.role()));
+    }
+
+    @Transactional
+    public AdminUserResponse createUser(
+            UUID tenantId,
+            AdminCreateUserRequest request) {
+        TenantEntity tenant = tenantRepository.findById(tenantId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "Tenant not found"
+            ));
+        String email = request.email().trim().toLowerCase(Locale.ROOT);
+        if (userRepository.existsByEmail(email)) {
+            throw new EmailAlreadyRegisteredException();
+        }
+        if (request.password().getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Password must not exceed 72 UTF-8 bytes"
+            );
+        }
+        UserEntity user = userRepository.saveAndFlush(new UserEntity(
+            UUID.randomUUID(),
+            email,
+            passwordEncoder.encode(request.password())
+        ));
+        TenantMembershipEntity membership = saveMembership(
+            user,
+            tenant,
+            request.role()
+        );
+        return new AdminUserResponse(
+            user.getId(),
+            user.getEmail(),
+            membership.getTenantId(),
+            MembershipRole.valueOf(membership.getRole())
+        );
     }
 
     @Transactional

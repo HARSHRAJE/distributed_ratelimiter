@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ratelimiter.auth.config.SecurityConfig;
 import com.ratelimiter.auth.dto.AdminBootstrapResponse;
+import com.ratelimiter.auth.dto.AdminCreateUserRequest;
+import com.ratelimiter.auth.dto.AdminUserResponse;
 import com.ratelimiter.auth.dto.CreateTenantRequest;
 import com.ratelimiter.auth.dto.MembershipResponse;
 import com.ratelimiter.auth.dto.TenantResponse;
@@ -78,6 +80,76 @@ class AdminProvisioningControllerTests {
                     {"tenantKey":"demo","name":"Demo"}
                     """))
             .andExpect(status().isCreated());
+    }
+
+    @Test
+    void userCreationRequiresAuthentication() throws Exception {
+        mockMvc.perform(post(
+                    "/api/v1/auth/admin/tenants/{tenantId}/users",
+                    UUID.randomUUID()
+                )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "email":"new-user@example.com",
+                      "password":"Valid-demo-password-123!",
+                      "role":"TENANT_MEMBER"
+                    }
+                    """))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "TENANT_ADMIN")
+    void userCreationRequiresSuperAdminRole() throws Exception {
+        mockMvc.perform(post(
+                    "/api/v1/auth/admin/tenants/{tenantId}/users",
+                    UUID.randomUUID()
+                )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "email":"new-user@example.com",
+                      "password":"Valid-demo-password-123!",
+                      "role":"TENANT_MEMBER"
+                    }
+                    """))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "SUPER_ADMIN")
+    void superAdminCanCreateUserInTenant() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        when(provisioningService.createUser(
+                eq(tenantId),
+                any(AdminCreateUserRequest.class)
+        )).thenReturn(new AdminUserResponse(
+            userId,
+            "new-user@example.com",
+            tenantId,
+            MembershipRole.TENANT_MEMBER
+        ));
+
+        mockMvc.perform(post(
+                    "/api/v1/auth/admin/tenants/{tenantId}/users",
+                    tenantId
+                )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "email":"new-user@example.com",
+                      "password":"Valid-demo-password-123!",
+                      "role":"TENANT_MEMBER"
+                    }
+                    """))
+            .andExpect(status().isCreated());
+
+        verify(provisioningService).createUser(
+            eq(tenantId),
+            any(AdminCreateUserRequest.class)
+        );
     }
 
     @Test

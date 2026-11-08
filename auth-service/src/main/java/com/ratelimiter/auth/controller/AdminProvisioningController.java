@@ -2,6 +2,8 @@ package com.ratelimiter.auth.controller;
 
 import com.ratelimiter.auth.dto.AdminBootstrapRequest;
 import com.ratelimiter.auth.dto.AdminBootstrapResponse;
+import com.ratelimiter.auth.dto.AdminCreateUserRequest;
+import com.ratelimiter.auth.dto.AdminUserResponse;
 import com.ratelimiter.auth.dto.CreateMembershipRequest;
 import com.ratelimiter.auth.dto.CreateTenantRequest;
 import com.ratelimiter.auth.dto.MembershipResponse;
@@ -55,6 +57,16 @@ public class AdminProvisioningController {
             @Valid @RequestBody CreateMembershipRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(
             provisioningService.addMembership(tenantId, request)
+        );
+    }
+
+    @PostMapping("/tenants/{tenantId}/users")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<AdminUserResponse> createUser(
+            @PathVariable UUID tenantId,
+            @Valid @RequestBody AdminCreateUserRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+            provisioningService.createUser(tenantId, request)
         );
     }
 }
